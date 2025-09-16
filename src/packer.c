@@ -16,12 +16,6 @@ typedef struct s_file_view
     uint8_t *data;
 } t_file_view;
 
-static int report_error(const char *msg)
-{
-    fprintf(stderr, "woody_woodpacker: %s\n", msg);
-    return (-1);
-}
-
 static uint32_t flags_to_prot(uint32_t flags)
 {
     uint32_t prot;
@@ -143,7 +137,7 @@ static int process_elf(const t_file_view *view)
     uint32_t key[4];
     uint64_t nonce;
     if (getentropy(entropy, sizeof(entropy)) < 0)
-        return (free(output), report_error("random generation failed"));
+        return (free(output), fprintf(stderr, "random generation failed"), -1);
     memcpy(key, entropy, sizeof(key));
     memcpy(&nonce, entropy + sizeof(key), sizeof(nonce));
     if (nonce == 0)
