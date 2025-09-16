@@ -31,7 +31,6 @@ uint64_t align_up(uint64_t value, uint64_t alignment);
 uint64_t align_down(uint64_t value, uint64_t alignment);
 
 void xtea_ctr_transform(uint8_t *data, size_t len, const uint32_t key[4], uint64_t nonce);
-int fill_random(void *dst, size_t len);
 
 extern const unsigned char woody_stub_start[];
 extern const unsigned char woody_stub_end[];
