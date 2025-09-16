@@ -24,9 +24,6 @@ struct stub_metadata
 
 int pack_elf64(const char *path);
 
-void *woody_memcpy(void *dst, const void *src, size_t n);
-void woody_bzero(void *ptr, size_t n);
-int woody_memcmp(const void *a, const void *b, size_t n);
 uint64_t align_up(uint64_t value, uint64_t alignment);
 uint64_t align_down(uint64_t value, uint64_t alignment);
 
