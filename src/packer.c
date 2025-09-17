@@ -16,6 +16,26 @@ typedef struct s_file_view
     uint8_t *data;
 } t_file_view;
 
+struct pack_job
+{
+    const t_file_view *view; // raw elf file
+    const Elf64_Ehdr *ehdr;  // elf header
+    const Elf64_Phdr *phdrs; // program header
+    const Elf64_Phdr *exec;  // exec segment
+    size_t exec_idx;         // exec segment idx
+};
+
+struct pack_layout
+{
+    uint64_t insert_point;  // where we will insert the stub (not aligned)
+    size_t pad;             // insert point termination pad
+    uint64_t stub_file_off; // where we will insert the stub (aligned)
+    size_t growth;          // pad + stub size (aligned)
+    size_t tail_pad;        // final alignement
+    size_t stub_size;       // stub size
+    size_t meta_offset;     // meta offset from stub_file_off
+};
+
 static uint32_t flags_to_prot(uint32_t flags)
 {
     uint32_t prot;
@@ -90,68 +110,20 @@ static int write_output(const uint8_t *buf, size_t size)
     return (close(fd), 0);
 }
 
-static int process_elf(const t_file_view *view)
+static void fill_stub_metadata(const struct pack_job *job, const struct pack_layout *layout, uint8_t *output, const uint32_t key[4], uint64_t nonce)
 {
-    const Elf64_Ehdr *ehdr;
-    const Elf64_Phdr *ph_table;
-    size_t exec_idx;
-
-    ehdr = (const Elf64_Ehdr *)view->data;
-    ph_table = (const Elf64_Phdr *)(view->data + ehdr->e_phoff);
-    exec_idx = 0;
-    for (size_t i = 0; i < ehdr->e_phnum; ++i)
-    {
-        if (ph_table[i].p_type == PT_LOAD && (ph_table[i].p_flags & PF_X))
-        {
-            exec_idx = i;
-            break;
-        }
-    }
-    const Elf64_Phdr *exec = &ph_table[exec_idx];
-    const uint64_t entry = ehdr->e_entry;
-    const uint64_t enc_file_off = exec->p_offset + (entry - exec->p_vaddr);
-    const uint64_t enc_file_end = exec->p_offset + exec->p_filesz;
-    const size_t enc_len = (size_t)(enc_file_end - enc_file_off);
-    const size_t stub_size = (size_t)(woody_stub_end - woody_stub_start);
-    const size_t meta_offset = (size_t)(woody_stub_metadata - woody_stub_start);
-    const uint64_t insert_point = exec->p_offset + exec->p_filesz;
-    const size_t pad = (size_t)(align_up(insert_point, 16) - insert_point);
-    const uint64_t stub_file_off = insert_point + pad;
-    const size_t growth = pad + stub_size;
-    const size_t new_size = view->size;
-    uint8_t *output = (uint8_t *)malloc(new_size);
-    if (!output)
-        return (perror("malloc"), -1);
-    memcpy(output, view->data, view->size);
-    if (pad)
-        memset(output + insert_point, 0, pad);
-    memcpy(output + stub_file_off, woody_stub_start, stub_size);
     Elf64_Ehdr *out_ehdr = (Elf64_Ehdr *)output;
-    Elf64_Phdr *out_phdr = (Elf64_Phdr *)(output + out_ehdr->e_phoff);
-    Elf64_Phdr *out_exec = &out_phdr[exec_idx];
-    const uint64_t old_exec_filesz = exec->p_filesz;
-    out_exec->p_filesz = old_exec_filesz + growth;
-    out_exec->p_memsz = exec->p_memsz + growth;
-    uint8_t *enc_ptr = output + (size_t)enc_file_off;
-    uint8_t entropy[sizeof(uint32_t) * 4 + sizeof(uint64_t)];
-    uint32_t key[4];
-    uint64_t nonce;
-    if (getentropy(entropy, sizeof(entropy)) < 0)
-        return (free(output), fprintf(stderr, "random generation failed"), -1);
-    memcpy(key, entropy, sizeof(key));
-    memcpy(&nonce, entropy + sizeof(key), sizeof(nonce));
-    if (nonce == 0)
-        nonce = ((uint64_t)enc_file_off << 32) ^ stub_file_off;
-    xtea_ctr_transform(enc_ptr, enc_len, key, nonce);
-    struct stub_metadata *meta = (struct stub_metadata *)(output + stub_file_off + meta_offset);
-    const uint64_t stub_rva = exec->p_vaddr + old_exec_filesz + pad;
+    struct stub_metadata *meta;
+    const uint64_t stub_rva = job->exec->p_vaddr + job->exec->p_filesz + layout->pad;
+
+    meta = (struct stub_metadata *)(output + (size_t)layout->stub_file_off + layout->meta_offset);
     meta->self_entry_rva = stub_rva;
-    meta->original_entry_rva = entry;
-    meta->encrypted_rva = entry;
-    meta->encrypted_size = enc_len;
+    meta->original_entry_rva = job->ehdr->e_entry;
+    meta->encrypted_rva = job->exec->p_vaddr;
+    meta->encrypted_size = job->exec->p_filesz;
     meta->page_rva = align_down(meta->encrypted_rva, PAGE_SIZE);
     meta->page_size = align_up(meta->encrypted_rva + meta->encrypted_size, PAGE_SIZE) - meta->page_rva;
-    meta->original_prot = flags_to_prot(out_exec->p_flags);
+    meta->original_prot = flags_to_prot(job->exec->p_flags);
     meta->nonce = nonce;
     for (size_t i = 0; i < 4; ++i)
         meta->key[i] = key[i];
@@ -159,8 +131,119 @@ static int process_elf(const t_file_view *view)
     out_ehdr->e_shoff = 0;
     out_ehdr->e_shnum = 0;
     out_ehdr->e_shstrndx = SHN_UNDEF;
+}
+
+/**
+ * replace and reset header at adapted offset
+ */
+static void reconstruct_header(uint8_t *output, const struct pack_job *job, const struct pack_layout *layout)
+{
+    Elf64_Ehdr *out_ehdr = (Elf64_Ehdr *)output;
+    if (job->ehdr->e_phoff >= layout->insert_point)
+        out_ehdr->e_phoff += layout->growth;
+    Elf64_Phdr *out_phdr = (Elf64_Phdr *)(output + out_ehdr->e_phoff);
+    for (size_t i = 0; i < job->ehdr->e_phnum; ++i)
+        if (job->phdrs[i].p_offset >= layout->insert_point)
+            out_phdr[i].p_offset += layout->growth;
+    Elf64_Phdr *out_exec = &out_phdr[job->exec_idx];
+    out_exec->p_filesz += layout->growth;
+    out_exec->p_memsz += layout->growth;
+}
+
+/**
+ * clone the elf inserting the stub we need to decryption
+ * @return the output binary
+ */
+static uint8_t *clone_with_stub(const struct pack_job *job, const struct pack_layout *layout)
+{
+    uint8_t *output = (uint8_t *)malloc(job->view->size + layout->growth);
+    const size_t insert = (size_t)layout->insert_point;
+    const size_t stub_off = (size_t)layout->stub_file_off;
+
+    if (!output)
+        return (NULL);
+    memcpy(output, job->view->data, insert);                                                      // copy first part
+    memset(output + insert, 0, layout->pad);                                                      // align
+    memcpy(output + stub_off, woody_stub_start, layout->stub_size);                               // insert stub
+    memset(output + stub_off + layout->stub_size, 0, layout->tail_pad);                           // align
+    memcpy(output + insert + layout->growth, job->view->data + insert, job->view->size - insert); // copy last part
+    reconstruct_header(output, job, layout);
+    return (output);
+}
+
+/**
+ * set pack_layout depending on pack_job
+ */
+static void set_layout(const struct pack_job *job, struct pack_layout *layout)
+{
+    const uint64_t insert_point = job->exec->p_offset + job->exec->p_filesz;
+    const size_t stub_size = (size_t)(woody_stub_end - woody_stub_start);
+    const size_t pad = (size_t)(align_up(insert_point, 16) - insert_point);
+    const uint64_t segment_align = job->exec->p_align ? job->exec->p_align : 0x10u;
+    const size_t raw_growth = pad + stub_size;
+    const size_t aligned_growth = (size_t)align_up(raw_growth, segment_align);
+
+    layout->insert_point = job->exec->p_offset + job->exec->p_filesz;
+    layout->pad = pad;
+    layout->stub_file_off = insert_point + pad;
+    layout->growth = aligned_growth;
+    layout->tail_pad = aligned_growth - raw_growth;
+    layout->stub_size = stub_size;
+    layout->meta_offset = (size_t)(woody_stub_metadata - woody_stub_start);
+}
+
+/**
+ * set pack_job struct depending on t_file_view struct
+ * @return true on success, false on error
+ */
+static bool set_job(const t_file_view *view, struct pack_job *job)
+{
+    const Elf64_Ehdr *ehdr = (const Elf64_Ehdr *)view->data;
+    const Elf64_Phdr *phdrs = (const Elf64_Phdr *)(view->data + ehdr->e_phoff);
+    size_t exec_idx = 0;
+    for (size_t i = 0; i < ehdr->e_phnum; ++i)
+    {
+        if (phdrs[i].p_type == PT_LOAD && (phdrs[i].p_flags & PF_X))
+        {
+            exec_idx = i;
+            break;
+        }
+    }
+    const Elf64_Phdr *exec = &phdrs[exec_idx];
+    if (ehdr->e_entry < exec->p_vaddr || ehdr->e_entry >= exec->p_vaddr + exec->p_filesz)
+        return (fprintf(stderr, "woody_woodpacker: entry not in chosen exec PT_LOAD\n"), false);
+    job->view = view;
+    job->ehdr = ehdr;
+    job->phdrs = phdrs;
+    job->exec = exec;
+    job->exec_idx = exec_idx;
+    return (true);
+}
+
+static int process_elf(const t_file_view *view)
+{
+    struct pack_job job;
+    struct pack_layout layout;
+    uint8_t entropy[sizeof(uint32_t) * 4 + sizeof(uint64_t)];
+    uint32_t key[4];
+    uint64_t nonce;
+
+    if (!set_job(view, &job))
+        return (-1);
+    set_layout(&job, &layout);
+    uint8_t *output = clone_with_stub(&job, &layout);
+    if (!output)
+        return (perror("malloc"), -1);
+    if (getentropy(entropy, sizeof(entropy)) < 0)
+        return (free(output), fprintf(stderr, "random generation failed\n"), -1);
+    memcpy(key, entropy, sizeof(key));
+    memcpy(&nonce, entropy + sizeof(key), sizeof(nonce));
+    if (nonce == 0)
+        nonce = ((uint64_t)job.exec->p_offset << 32) ^ layout.stub_file_off;
+    xtea_ctr_transform(output + job.exec->p_offset, job.exec->p_filesz, key, nonce);
+    fill_stub_metadata(&job, &layout, output, key, nonce);
     printf("key %08x-%08x-%08x-%08x nonce %016llx\n", key[0], key[1], key[2], key[3], (unsigned long long)nonce);
-    if (write_output(output, new_size) != 0)
+    if (write_output(output, job.view->size + layout.growth) != 0)
         return (free(output), -1);
     return (free(output), 0);
 }
