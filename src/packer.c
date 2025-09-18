@@ -16,6 +16,20 @@ typedef struct s_file_view
     uint8_t *data;
 } t_file_view;
 
+struct stub_metadata
+{
+    uint64_t self_entry_rva;
+    uint64_t original_entry_rva;
+    uint64_t encrypted_rva;
+    uint64_t encrypted_size;
+    uint64_t page_rva;
+    uint64_t page_size;
+    uint32_t original_prot;
+    uint32_t reserved;
+    uint64_t nonce;
+    uint32_t key[4];
+};
+
 struct pack_job
 {
     const t_file_view *view; // raw elf file
@@ -128,8 +142,8 @@ static void fill_stub_metadata(const struct pack_job *job, const struct pack_lay
     for (size_t i = 0; i < 4; ++i)
         meta->key[i] = key[i];
     out_ehdr->e_entry = stub_rva;
-    out_ehdr->e_shoff = 0;
-    out_ehdr->e_shnum = 0;
+    out_ehdr->e_shoff = SHN_UNDEF;
+    out_ehdr->e_shnum = SHN_UNDEF;
     out_ehdr->e_shstrndx = SHN_UNDEF;
 }
 
