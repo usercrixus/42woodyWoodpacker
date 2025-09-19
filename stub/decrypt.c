@@ -72,25 +72,24 @@ static STUB_CODE NO_STACK void decrypt_payload(uint8_t *cursor, uint64_t remaini
 
 static STUB_CODE NO_STACK uintptr_t prepare_original_entry(uintptr_t stub_addr)
 {
-    struct stub_metadata *meta = &woody_stub_metadata;
-    const uintptr_t bias = stub_addr - meta->self_entry_rva;
+    const uintptr_t bias = stub_addr - woody_stub_metadata.self_entry_rva;
     uint32_t key[4];
 
     stub_syscall(SYS_WRITE, 1, (long)stub_banner, (long)(sizeof(stub_banner) - 1));
 
     for (int i = 0; i < 4; ++i)
-        key[i] = meta->key[i];
+        key[i] = woody_stub_metadata.key[i];
 
-    void *page = (void *)(meta->page_rva + bias);
-    if (stub_syscall(SYS_MPROTECT, (long)page, (long)meta->page_size, 7) < 0)
+    void *page = (void *)(woody_stub_metadata.page_rva + bias);
+    if (stub_syscall(SYS_MPROTECT, (long)page, (long)woody_stub_metadata.page_size, 7) < 0)
         stub_syscall(SYS_EXIT, 1, 0, 0);
 
-    decrypt_payload((uint8_t *)(meta->encrypted_rva + bias), meta->encrypted_size, key, meta->nonce);
+    decrypt_payload((uint8_t *)(woody_stub_metadata.encrypted_rva + bias), woody_stub_metadata.encrypted_size, key, woody_stub_metadata.nonce);
 
-    if (stub_syscall(SYS_MPROTECT, (long)page, (long)meta->page_size, (long)meta->original_prot) < 0)
+    if (stub_syscall(SYS_MPROTECT, (long)page, (long)woody_stub_metadata.page_size, (long)woody_stub_metadata.original_prot) < 0)
         stub_syscall(SYS_EXIT, 1, 0, 0);
 
-    return meta->original_entry_rva + bias;
+    return woody_stub_metadata.original_entry_rva + bias;
 }
 
 STUB_CODE ALIGN16 void woody_stub_start(uint64_t argc, char **argv, char **envp)

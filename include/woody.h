@@ -10,16 +10,16 @@
 
 struct stub_metadata
 {
-    uint64_t self_entry_rva;
-    uint64_t original_entry_rva;
-    uint64_t encrypted_rva;
-    uint64_t encrypted_size;
-    uint64_t page_rva;
-    uint64_t page_size;
-    uint32_t original_prot;
-    uint32_t reserved;
-    uint64_t nonce;
-    uint32_t key[4];
+    uint64_t self_entry_rva;     // RVA (relative virtual address) of the stub’s own entry point (woody_stub_start
+    uint64_t original_entry_rva; // RVA of the program’s real entry point (before packing).
+    uint64_t encrypted_rva;      // RVA of the encrypted payload in memory.
+    uint64_t encrypted_size;     // Size in bytes of the encrypted region.
+    uint64_t page_rva;           // RVA of the page containing the encrypted region.
+    uint64_t page_size;          // Size of that memory page (or pages).
+    uint32_t original_prot;      // Original memory protection flags of the page (PROT_READ, PROT_EXEC, etc.).
+    uint32_t reserved;           // Padding/alignment slot.
+    uint64_t nonce;              // Starting counter value for the stream cipher.
+    uint32_t key[4];             // 128-bit encryption key
 };
 
 int pack_elf64(const char *path);
