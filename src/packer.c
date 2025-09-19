@@ -16,20 +16,6 @@ typedef struct s_file_view
     uint8_t *data;
 } t_file_view;
 
-struct stub_metadata
-{
-    uint64_t self_entry_rva;
-    uint64_t original_entry_rva;
-    uint64_t encrypted_rva;
-    uint64_t encrypted_size;
-    uint64_t page_rva;
-    uint64_t page_size;
-    uint32_t original_prot;
-    uint32_t reserved;
-    uint64_t nonce;
-    uint32_t key[4];
-};
-
 struct pack_job
 {
     const t_file_view *view; // raw elf file
@@ -48,6 +34,7 @@ struct pack_layout
     size_t tail_pad;        // final alignement
     size_t stub_size;       // stub size
     size_t meta_offset;     // meta offset from stub_file_off
+    size_t entry_offset;    // entry offset from stub base
 };
 
 static uint32_t flags_to_prot(uint32_t flags)
@@ -128,10 +115,11 @@ static void fill_stub_metadata(const struct pack_job *job, const struct pack_lay
 {
     Elf64_Ehdr *out_ehdr = (Elf64_Ehdr *)output;
     struct stub_metadata *meta;
-    const uint64_t stub_rva = job->exec->p_vaddr + job->exec->p_filesz + layout->pad;
+    const uint64_t stub_base_rva = job->exec->p_vaddr + job->exec->p_filesz + layout->pad;
+    const uint64_t entry_rva = stub_base_rva + layout->entry_offset;
 
     meta = (struct stub_metadata *)(output + (size_t)layout->stub_file_off + layout->meta_offset);
-    meta->self_entry_rva = stub_rva;
+    meta->self_entry_rva = entry_rva;
     meta->original_entry_rva = job->ehdr->e_entry;
     meta->encrypted_rva = job->exec->p_vaddr;
     meta->encrypted_size = job->exec->p_filesz;
@@ -141,7 +129,7 @@ static void fill_stub_metadata(const struct pack_job *job, const struct pack_lay
     meta->nonce = nonce;
     for (size_t i = 0; i < 4; ++i)
         meta->key[i] = key[i];
-    out_ehdr->e_entry = stub_rva;
+    out_ehdr->e_entry = entry_rva;
     out_ehdr->e_shoff = SHN_UNDEF;
     out_ehdr->e_shnum = SHN_UNDEF;
     out_ehdr->e_shstrndx = SHN_UNDEF;
@@ -173,12 +161,13 @@ static uint8_t *clone_with_stub(const struct pack_job *job, const struct pack_la
     uint8_t *output = (uint8_t *)malloc(job->view->size + layout->growth);
     const size_t insert = (size_t)layout->insert_point;
     const size_t stub_off = (size_t)layout->stub_file_off;
+    const unsigned char *stub = woody_stub_data();
 
     if (!output)
         return (NULL);
     memcpy(output, job->view->data, insert);                                                      // copy first part
     memset(output + insert, 0, layout->pad);                                                      // align
-    memcpy(output + stub_off, woody_stub_start, layout->stub_size);                               // insert stub
+    memcpy(output + stub_off, stub, layout->stub_size);                                           // insert stub
     memset(output + stub_off + layout->stub_size, 0, layout->tail_pad);                           // align
     memcpy(output + insert + layout->growth, job->view->data + insert, job->view->size - insert); // copy last part
     reconstruct_header(output, job, layout);
@@ -191,7 +180,7 @@ static uint8_t *clone_with_stub(const struct pack_job *job, const struct pack_la
 static void set_layout(const struct pack_job *job, struct pack_layout *layout)
 {
     const uint64_t insert_point = job->exec->p_offset + job->exec->p_filesz;
-    const size_t stub_size = (size_t)(woody_stub_end - woody_stub_start);
+    const size_t stub_size = woody_stub_size();
     const size_t pad = (size_t)(align_up(insert_point, 16) - insert_point);
     const uint64_t segment_align = job->exec->p_align ? job->exec->p_align : 0x10u;
     const size_t raw_growth = pad + stub_size;
@@ -203,7 +192,8 @@ static void set_layout(const struct pack_job *job, struct pack_layout *layout)
     layout->growth = aligned_growth;
     layout->tail_pad = aligned_growth - raw_growth;
     layout->stub_size = stub_size;
-    layout->meta_offset = (size_t)(woody_stub_metadata - woody_stub_start);
+    layout->meta_offset = woody_stub_meta_offset();
+    layout->entry_offset = woody_stub_entry_offset();
 }
 
 /**
