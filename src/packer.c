@@ -34,7 +34,6 @@ struct pack_layout
     size_t tail_pad;        // final alignement
     size_t stub_size;       // stub size
     size_t meta_offset;     // meta offset from stub_file_off
-    size_t entry_offset;    // entry offset from stub base
 };
 
 static uint32_t flags_to_prot(uint32_t flags)
@@ -116,15 +115,13 @@ static void fill_stub_metadata(const struct pack_job *job, const struct pack_lay
     Elf64_Ehdr *out_ehdr = (Elf64_Ehdr *)output;
     struct stub_metadata *meta;
     const uint64_t stub_base_rva = job->exec->p_vaddr + job->exec->p_filesz + layout->pad;
-    const uint64_t entry_rva = stub_base_rva + layout->entry_offset;
+    const uint64_t entry_rva = stub_base_rva;
 
     meta = (struct stub_metadata *)(output + (size_t)layout->stub_file_off + layout->meta_offset);
     meta->self_entry_rva = entry_rva;
     meta->original_entry_rva = job->ehdr->e_entry;
     meta->encrypted_rva = job->exec->p_vaddr;
     meta->encrypted_size = job->exec->p_filesz;
-    meta->page_rva = align_down(meta->encrypted_rva, PAGE_SIZE);
-    meta->page_size = align_up(meta->encrypted_rva + meta->encrypted_size, PAGE_SIZE) - meta->page_rva;
     meta->original_prot = flags_to_prot(job->exec->p_flags);
     meta->nonce = nonce;
     for (size_t i = 0; i < 4; ++i)
@@ -193,7 +190,6 @@ static void set_layout(const struct pack_job *job, struct pack_layout *layout)
     layout->tail_pad = aligned_growth - raw_growth;
     layout->stub_size = stub_size;
     layout->meta_offset = woody_stub_meta_offset();
-    layout->entry_offset = woody_stub_entry_offset();
 }
 
 /**
