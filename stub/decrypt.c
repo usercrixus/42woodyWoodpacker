@@ -7,7 +7,6 @@
 #define STUB_ENTRY  __attribute__((section(".text.woody_stub.entry"), used, aligned(16)))
 #define STUB_RODATA __attribute__((section(".rodata.woody_stub"), used))
 #define STUB_BSS    __attribute__((section(".bss.woody_stub"), used))
-#define NO_STACK __attribute__((no_stack_protector))
 #define NORETURN __attribute__((noreturn))
 
 enum
@@ -32,7 +31,7 @@ static STUB_CODE inline long stub_syscall(long n, long a, long b, long c)
     return ret;
 }
 
-static STUB_CODE NO_STACK void decrypt_payload(uint8_t *cursor, uint64_t remaining, const uint32_t key[4], uint64_t counter)
+static STUB_CODE void decrypt_payload(uint8_t *cursor, uint64_t remaining, const uint32_t key[4], uint64_t counter)
 {
     while (remaining)
     {
@@ -70,7 +69,7 @@ static STUB_CODE NO_STACK void decrypt_payload(uint8_t *cursor, uint64_t remaini
     }
 }
 
-static STUB_CODE NO_STACK uintptr_t prepare_original_entry(uintptr_t stub_addr)
+static STUB_CODE uintptr_t prepare_original_entry(uintptr_t stub_addr)
 {
     const uintptr_t bias = stub_addr - woody_stub_metadata.self_entry_rva;
     const uint64_t encrypted_end_rva = woody_stub_metadata.encrypted_rva + woody_stub_metadata.encrypted_size;
@@ -96,7 +95,7 @@ static STUB_CODE NO_STACK uintptr_t prepare_original_entry(uintptr_t stub_addr)
     return woody_stub_metadata.original_entry_rva + bias;
 }
 
-STUB_ENTRY NO_STACK void woody_stub_start(uint64_t argc, char **argv, char **envp)
+STUB_ENTRY void woody_stub_start(uint64_t argc, char **argv, char **envp)
 {
     const uintptr_t stub_addr = (uintptr_t)(const void *)&woody_stub_start;
     const uintptr_t entry = prepare_original_entry(stub_addr);
