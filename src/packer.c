@@ -9,6 +9,9 @@
 #include <stdbool.h>
 #include <string.h>
 
+/**
+ * struct used to store the file mapping data
+ */
 typedef struct s_file_view
 {
     int fd;
@@ -16,6 +19,9 @@ typedef struct s_file_view
     uint8_t *data;
 } t_file_view;
 
+/**
+ * structs used to pack the elf file with the stub and the metadata
+ */
 struct pack_job
 {
     const t_file_view *view; // raw elf file
@@ -25,6 +31,9 @@ struct pack_job
     size_t exec_idx;         // exec segment idx
 };
 
+/**
+ * layout of the new file with the stub and the metadata, used to compute offsets and sizes
+ */
 struct pack_layout
 {
     uint64_t insert_point;  // where we will insert the stub (not aligned)
@@ -36,6 +45,9 @@ struct pack_layout
     size_t meta_offset;     // meta offset from stub_file_off
 };
 
+/**
+ * convert elf flags to memory protection flags
+ */
 static uint32_t flags_to_prot(uint32_t flags)
 {
     uint32_t prot;
@@ -198,9 +210,9 @@ static void set_layout(const struct pack_job *job, struct pack_layout *layout)
  */
 static bool set_job(const t_file_view *view, struct pack_job *job)
 {
-    const Elf64_Ehdr *ehdr = (const Elf64_Ehdr *)view->data;
-    const Elf64_Phdr *phdrs = (const Elf64_Phdr *)(view->data + ehdr->e_phoff);
-    size_t exec_idx = 0;
+    const Elf64_Ehdr *ehdr = (const Elf64_Ehdr *)view->data; // elf header
+    const Elf64_Phdr *phdrs = (const Elf64_Phdr *)(view->data + ehdr->e_phoff); // program header
+    size_t exec_idx = 0; // index of the exec segment in the program header table
     for (size_t i = 0; i < ehdr->e_phnum; ++i)
     {
         if (phdrs[i].p_type == PT_LOAD && (phdrs[i].p_flags & PF_X))
@@ -209,7 +221,7 @@ static bool set_job(const t_file_view *view, struct pack_job *job)
             break;
         }
     }
-    const Elf64_Phdr *exec = &phdrs[exec_idx];
+    const Elf64_Phdr *exec = &phdrs[exec_idx]; // exec segment, we will encrypt it and jump to the stub from there
     if (ehdr->e_entry < exec->p_vaddr || ehdr->e_entry >= exec->p_vaddr + exec->p_filesz)
         return (fprintf(stderr, "woody_woodpacker: entry not in chosen exec PT_LOAD\n"), false);
     job->view = view;
