@@ -75,10 +75,10 @@ static bool map_input(const char *path, t_file_view *view)
     if (view->fd < 0)
         return (perror("open"), false);
     size = lseek(view->fd, 0, SEEK_END);
-    if (size <= 0 || lseek(view->fd, 0, SEEK_SET) < 0)
+    if (size <= 0 || lseek(view->fd, 0, SEEK_SET) < 0) // reset the offset to the beginning of the file
         return (perror("lseek"), close(view->fd), false);
     view->size = (size_t)size;
-    view->data = (uint8_t *)mmap(NULL, view->size, PROT_READ, MAP_PRIVATE, view->fd, 0);
+    view->data = (uint8_t *)mmap(NULL, view->size, PROT_READ, MAP_PRIVATE, view->fd, 0); // map the file in memory
     if (view->data == MAP_FAILED)
         return (perror("mmap"), close(view->fd), false);
     return (true);
