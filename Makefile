@@ -3,7 +3,7 @@ CFLAGS  := -Wall -Wextra -Werror -std=c11 -Iinclude
 LDFLAGS := -Wl,-Tsrc/stub/woody_stub.ld
 NAME    := woody_woodpacker
 
-SRCS    := src/main.c src/packer.c src/encryption/xtea_ctr.c src/utils.c src/stub/decrypt.c
+SRCS    := src/main.c src/packer.c src/encryption/xtea_ctr/xtea_ctr_encrypt.c src/encryption/xtea_ctr/xtea_ctr_decrypt.c src/utils.c src/stub/decrypt.c
 OBJS    := $(SRCS:.c=.o)
 
 all: $(NAME)

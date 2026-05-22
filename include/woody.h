@@ -4,16 +4,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define WOODY_OUTPUT "woody"
+#define WOODY_OUTPUT "woody" // name of the encrypted ELF (output)
 #define PAGE_SIZE 0x1000u
-#define ALGO_DATA_SIZE 1024u
-
+#define ALGO_DATA_SIZE 1024u // DATA buffer for algo
+/**
+ * The available encryption algo
+ */
 typedef enum e_algo
 {
     ALGO_INVALID = 0,
     XTEA_CTR = 1
 } e_algo;
-
 /**
  * Metadata structure that the stub will use to locate and decrypt the encrypted payload at runtime.
  * This structure will be embedded in the stub code itself, and the stub will read it to know where the encrypted payload is in memory,
@@ -50,15 +51,6 @@ uint64_t align_up(uint64_t value, uint64_t alignment);
  * align_down(0x1234, 0x100) = 0x1200
  * align_down(0x1234, 0) = 0x1234
  */ uint64_t align_down(uint64_t value, uint64_t alignment);
-/**
- * Encrypt or decrypt data in-place using XTEA in CTR mode. The same function can be used for both encryption and decryption since CTR mode is symmetric.
- * - data: pointer to the data to be encrypted/decrypted
- * - len: length of the data in bytes
- * - key: 128-bit encryption key (array of 4 uint32_t)
- * - nonce: 64-bit starting counter value for the stream cipher
- */
-int xtea_ctr_encrypt(uint8_t *data, size_t len, uint8_t algo_data[ALGO_DATA_SIZE]);
-void xtea_ctr_decrypt(uint8_t *cursor, uint64_t remaining, const uint8_t algo_data[ALGO_DATA_SIZE]);
 /**
  * Get a pointer to the embedded stub data.
  * Returns a pointer to the beginning of the stub data.
