@@ -5,7 +5,6 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <sys/random.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -122,7 +121,7 @@ static int write_output(const uint8_t *buf, size_t size)
     return (close(fd), 0);
 }
 
-static void fill_stub_metadata(const struct pack_job *job, const struct pack_layout *layout, uint8_t *output, const uint32_t key[4], uint64_t nonce, e_algo algo_id)
+static struct stub_metadata *fill_stub_metadata(const struct pack_job *job, const struct pack_layout *layout, uint8_t *output, e_algo algo_id)
 {
     Elf64_Ehdr *out_ehdr = (Elf64_Ehdr *)output;
     struct stub_metadata *meta;
@@ -135,14 +134,13 @@ static void fill_stub_metadata(const struct pack_job *job, const struct pack_lay
     meta->encrypted_rva = job->exec->p_vaddr;
     meta->encrypted_size = job->exec->p_filesz;
     meta->original_prot = flags_to_prot(job->exec->p_flags);
-    meta->nonce = nonce;
     meta->algo_id = algo_id;
-    for (size_t i = 0; i < 4; ++i)
-        meta->key[i] = key[i];
+    memset(meta->algo_data, 0, sizeof(meta->algo_data));
     out_ehdr->e_entry = entry_rva;
     out_ehdr->e_shoff = SHN_UNDEF;
     out_ehdr->e_shnum = SHN_UNDEF;
     out_ehdr->e_shstrndx = SHN_UNDEF;
+    return (meta);
 }
 
 /**
@@ -240,21 +238,18 @@ static e_algo get_e_algo(const char *algo)
     return ALGO_INVALID;
 }
 
-static void pick_encryption(e_algo algo_id, uint8_t *data, size_t len, const uint32_t key[4], uint64_t nonce)
+static int pick_encryption(e_algo algo_id, uint8_t *data, size_t len, uint8_t algo_data[ALGO_DATA_SIZE])
 {
     if (algo_id == XTEA_CTR)
-    {
-        xtea_ctr_encrypt(data, len, key, nonce);
-    }
+        return (xtea_ctr_encrypt(data, len, algo_data));
+    return (-1);
 }
 
 static int process_elf(const t_file_view *view, const char *algo)
 {
     struct pack_job job;
     struct pack_layout layout;
-    uint8_t entropy[sizeof(uint32_t) * 4 + sizeof(uint64_t)];
-    uint32_t key[4];
-    uint64_t nonce;
+    struct stub_metadata *meta;
     e_algo algo_id;
 
     algo_id = get_e_algo(algo);
@@ -264,15 +259,9 @@ static int process_elf(const t_file_view *view, const char *algo)
     uint8_t *output = clone_with_stub(&job, &layout);
     if (!output)
         return (perror("malloc"), -1);
-    if (getentropy(entropy, sizeof(entropy)) < 0)
-        return (free(output), fprintf(stderr, "random generation failed\n"), -1);
-    memcpy(key, entropy, sizeof(key));
-    memcpy(&nonce, entropy + sizeof(key), sizeof(nonce));
-    if (nonce == 0)
-        nonce = ((uint64_t)job.exec->p_offset << 32) ^ layout.stub_file_off;
-    pick_encryption(algo_id, output + job.exec->p_offset, job.exec->p_filesz, key, nonce);
-    fill_stub_metadata(&job, &layout, output, key, nonce, algo_id);
-    printf("key %08x-%08x-%08x-%08x nonce %016llx\n", key[0], key[1], key[2], key[3], (unsigned long long)nonce);
+    meta = fill_stub_metadata(&job, &layout, output, algo_id);
+    if (pick_encryption(algo_id, output + job.exec->p_offset, job.exec->p_filesz, meta->algo_data) != 0)
+        return (free(output), fprintf(stderr, "woody_woodpacker: encryption failed\n"), -1);
     if (write_output(output, job.view->size + layout.growth) != 0)
         return (free(output), -1);
     return (free(output), 0);

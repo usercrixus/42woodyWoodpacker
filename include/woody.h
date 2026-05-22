@@ -6,6 +6,7 @@
 
 #define WOODY_OUTPUT "woody"
 #define PAGE_SIZE 0x1000u
+#define ALGO_DATA_SIZE 1024u
 
 typedef enum e_algo
 {
@@ -26,9 +27,8 @@ struct stub_metadata
     uint64_t encrypted_size;     // Size in bytes of the encrypted region.
     uint32_t original_prot;      // Original memory protection flags of the page (PROT_READ, PROT_EXEC, etc.).
     uint32_t reserved;           // Padding/alignment slot.
-    uint64_t nonce;              // Starting counter value for the stream cipher.
-    uint32_t key[4];             // 128-bit encryption key.
     e_algo algo_id;              // the algo id with which the program was encrypted
+    uint8_t algo_data[ALGO_DATA_SIZE]; // Algorithm-specific data.
 };
 /**
  * Pack a 64-bit ELF binary at the given path, producing a new file named "woody" in the current directory.
@@ -57,8 +57,8 @@ uint64_t align_up(uint64_t value, uint64_t alignment);
  * - key: 128-bit encryption key (array of 4 uint32_t)
  * - nonce: 64-bit starting counter value for the stream cipher
  */
-void xtea_ctr_encrypt(uint8_t *data, size_t len, const uint32_t key[4], uint64_t nonce);
-void xtea_ctr_decrypt(uint8_t *cursor, uint64_t remaining, const uint32_t key[4], uint64_t counter);
+int xtea_ctr_encrypt(uint8_t *data, size_t len, uint8_t algo_data[ALGO_DATA_SIZE]);
+void xtea_ctr_decrypt(uint8_t *cursor, uint64_t remaining, const uint8_t algo_data[ALGO_DATA_SIZE]);
 /**
  * Get a pointer to the embedded stub data.
  * Returns a pointer to the beginning of the stub data.

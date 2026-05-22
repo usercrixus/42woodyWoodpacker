@@ -2,6 +2,7 @@
 #include "woody.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <sys/random.h>
@@ -10,7 +11,13 @@
 #define STUB_CODE __attribute__((section(".text.woody_stub"), used))
 #define NO_STACK __attribute__((no_stack_protector))
 
-void xtea_ctr_encrypt(uint8_t *data, size_t len, const uint32_t key[4], uint64_t nonce)
+struct xtea_ctr_data
+{
+    uint64_t nonce;
+    uint32_t key[4];
+};
+
+static void xtea_ctr_transform(uint8_t *data, size_t len, const uint32_t key[4], uint64_t nonce)
 {
     size_t offset;
 
@@ -43,8 +50,31 @@ void xtea_ctr_encrypt(uint8_t *data, size_t len, const uint32_t key[4], uint64_t
     }
 }
 
-STUB_CODE NO_STACK void xtea_ctr_decrypt(uint8_t *cursor, uint64_t remaining, const uint32_t key[4], uint64_t counter)
+int xtea_ctr_encrypt(uint8_t *data, size_t len, uint8_t algo_data[ALGO_DATA_SIZE])
 {
+    struct xtea_ctr_data *ctx;
+
+    ctx = (struct xtea_ctr_data *)algo_data;
+    if (getentropy(ctx, sizeof(*ctx)) < 0)
+        return (-1);
+    if (ctx->nonce == 0)
+        ctx->nonce = 1;
+    xtea_ctr_transform(data, len, ctx->key, ctx->nonce);
+    printf("key %08x-%08x-%08x-%08x nonce %016llx\n",
+           ctx->key[0], ctx->key[1], ctx->key[2], ctx->key[3],
+           (unsigned long long)ctx->nonce);
+    return (0);
+}
+
+STUB_CODE NO_STACK void xtea_ctr_decrypt(uint8_t *cursor, uint64_t remaining, const uint8_t algo_data[ALGO_DATA_SIZE])
+{
+    const struct xtea_ctr_data *ctx;
+    const uint32_t *key;
+    uint64_t counter;
+
+    ctx = (const struct xtea_ctr_data *)algo_data;
+    key = ctx->key;
+    counter = ctx->nonce;
     while (remaining)
     {
         uint32_t v0 = (uint32_t)counter;
