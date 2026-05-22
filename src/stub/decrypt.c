@@ -37,12 +37,12 @@ static STUB_CODE NO_STACK const char *stub_banner_addr(void)
     return (addr);
 }
 
-static STUB_CODE NO_STACK const uint8_t *stub_algo_data_addr(void)
+static STUB_CODE NO_STACK const struct stub_metadata *stub_metadata_addr(void)
 {
-    const uint8_t *addr;
+    const struct stub_metadata *addr;
 
     __asm__ volatile("leaq woody_stub_metadata(%%rip), %0" : "=r"(addr));
-    return (addr + offsetof(struct stub_metadata, algo_data));
+    return (addr);
 }
 
 static STUB_CODE inline long stub_syscall(long n, long a, long b, long c)
@@ -55,19 +55,20 @@ static STUB_CODE inline long stub_syscall(long n, long a, long b, long c)
     return ret;
 }
 
-static STUB_CODE NO_STACK void decrypt_payload(uint8_t *cursor, uint64_t remaining)
+static STUB_CODE NO_STACK void decrypt_payload(uint8_t *cursor, uint64_t remaining, const struct stub_metadata *meta)
 {
-    if (woody_stub_metadata.algo_id == XTEA_CTR)
+    if (meta->algo_id == XTEA_CTR)
     {
-        xtea_ctr_decrypt(cursor, remaining, stub_algo_data_addr());
+        xtea_ctr_decrypt(cursor, remaining, meta->algo_data);
     }
 }
 
 static STUB_CODE NO_STACK uintptr_t prepare_original_entry(uintptr_t stub_addr)
 {
-    const uintptr_t bias = stub_addr - woody_stub_metadata.self_entry_rva;
-    const uint64_t encrypted_end_rva = woody_stub_metadata.encrypted_rva + woody_stub_metadata.encrypted_size;
-    const uint64_t page_rva = woody_stub_metadata.encrypted_rva & ~(uint64_t)(PAGE_SIZE - 1u);
+    const struct stub_metadata *meta = stub_metadata_addr();
+    const uintptr_t bias = stub_addr - meta->self_entry_rva;
+    const uint64_t encrypted_end_rva = meta->encrypted_rva + meta->encrypted_size;
+    const uint64_t page_rva = meta->encrypted_rva & ~(uint64_t)(PAGE_SIZE - 1u);
     const uint64_t page_end_rva = (encrypted_end_rva + (PAGE_SIZE - 1u)) & ~(uint64_t)(PAGE_SIZE - 1u);
     const size_t page_size = (size_t)(page_end_rva - page_rva);
 
@@ -77,12 +78,12 @@ static STUB_CODE NO_STACK uintptr_t prepare_original_entry(uintptr_t stub_addr)
     if (stub_syscall(SYS_MPROTECT, (long)page, (long)page_size, 7) < 0)
         stub_syscall(SYS_EXIT, 1, 0, 0);
 
-    decrypt_payload((uint8_t *)(woody_stub_metadata.encrypted_rva + bias), woody_stub_metadata.encrypted_size);
+    decrypt_payload((uint8_t *)(meta->encrypted_rva + bias), meta->encrypted_size, meta);
 
-    if (stub_syscall(SYS_MPROTECT, (long)page, (long)page_size, (long)woody_stub_metadata.original_prot) < 0)
+    if (stub_syscall(SYS_MPROTECT, (long)page, (long)page_size, (long)meta->original_prot) < 0)
         stub_syscall(SYS_EXIT, 1, 0, 0);
 
-    return woody_stub_metadata.original_entry_rva + bias;
+    return meta->original_entry_rva + bias;
 }
 
 STUB_ENTRY NO_STACK void woody_stub_start(uint64_t argc, char **argv, char **envp)
