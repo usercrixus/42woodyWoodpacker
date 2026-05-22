@@ -122,7 +122,7 @@ static int write_output(const uint8_t *buf, size_t size)
     return (close(fd), 0);
 }
 
-static void fill_stub_metadata(const struct pack_job *job, const struct pack_layout *layout, uint8_t *output, const uint32_t key[4], uint64_t nonce)
+static void fill_stub_metadata(const struct pack_job *job, const struct pack_layout *layout, uint8_t *output, const uint32_t key[4], uint64_t nonce, e_algo algo_id)
 {
     Elf64_Ehdr *out_ehdr = (Elf64_Ehdr *)output;
     struct stub_metadata *meta;
@@ -136,6 +136,7 @@ static void fill_stub_metadata(const struct pack_job *job, const struct pack_lay
     meta->encrypted_size = job->exec->p_filesz;
     meta->original_prot = flags_to_prot(job->exec->p_flags);
     meta->nonce = nonce;
+    meta->algo_id = algo_id;
     for (size_t i = 0; i < 4; ++i)
         meta->key[i] = key[i];
     out_ehdr->e_entry = entry_rva;
@@ -232,14 +233,31 @@ static bool set_job(const t_file_view *view, struct pack_job *job)
     return (true);
 }
 
-static int process_elf(const t_file_view *view)
+static e_algo get_e_algo(const char *algo)
+{
+    if (strcmp("xtea_ctr", algo) == 0)
+        return XTEA_CTR;
+    return ALGO_INVALID;
+}
+
+static void pick_encryption(e_algo algo_id, uint8_t *data, size_t len, const uint32_t key[4], uint64_t nonce)
+{
+    if (algo_id == XTEA_CTR)
+    {
+        xtea_ctr_encrypt(data, len, key, nonce);
+    }
+}
+
+static int process_elf(const t_file_view *view, const char *algo)
 {
     struct pack_job job;
     struct pack_layout layout;
     uint8_t entropy[sizeof(uint32_t) * 4 + sizeof(uint64_t)];
     uint32_t key[4];
     uint64_t nonce;
+    e_algo algo_id;
 
+    algo_id = get_e_algo(algo);
     if (!set_job(view, &job))
         return (-1);
     set_layout(&job, &layout);
@@ -252,22 +270,22 @@ static int process_elf(const t_file_view *view)
     memcpy(&nonce, entropy + sizeof(key), sizeof(nonce));
     if (nonce == 0)
         nonce = ((uint64_t)job.exec->p_offset << 32) ^ layout.stub_file_off;
-    xtea_ctr_transform(output + job.exec->p_offset, job.exec->p_filesz, key, nonce);
-    fill_stub_metadata(&job, &layout, output, key, nonce);
+    pick_encryption(algo_id, output + job.exec->p_offset, job.exec->p_filesz, key, nonce);
+    fill_stub_metadata(&job, &layout, output, key, nonce, algo_id);
     printf("key %08x-%08x-%08x-%08x nonce %016llx\n", key[0], key[1], key[2], key[3], (unsigned long long)nonce);
     if (write_output(output, job.view->size + layout.growth) != 0)
         return (free(output), -1);
     return (free(output), 0);
 }
 
-int pack_elf64(const char *path)
+int pack_elf64(const char *path, const char *algo)
 {
     t_file_view view;
     int status;
 
     if (!map_input(path, &view))
         return (1);
-    status = process_elf(&view);
+    status = process_elf(&view, algo);
     unmap_input(&view);
     return (status != 0);
 }

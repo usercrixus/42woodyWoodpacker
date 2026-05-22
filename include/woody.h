@@ -6,6 +6,13 @@
 
 #define WOODY_OUTPUT "woody"
 #define PAGE_SIZE 0x1000u
+
+typedef enum e_algo
+{
+    ALGO_INVALID = 0,
+    XTEA_CTR = 1
+} e_algo;
+
 /**
  * Metadata structure that the stub will use to locate and decrypt the encrypted payload at runtime.
  * This structure will be embedded in the stub code itself, and the stub will read it to know where the encrypted payload is in memory,
@@ -21,12 +28,13 @@ struct stub_metadata
     uint32_t reserved;           // Padding/alignment slot.
     uint64_t nonce;              // Starting counter value for the stream cipher.
     uint32_t key[4];             // 128-bit encryption key.
+    e_algo algo_id;              // the algo id with which the program was encrypted
 };
 /**
  * Pack a 64-bit ELF binary at the given path, producing a new file named "woody" in the current directory.
  * The function returns 0 on success, or a non-zero value on failure.
  */
-int pack_elf64(const char *path);
+int pack_elf64(const char *path, const char *algo);
 /**
  * Align value up to alignment, alignment must be a power of 2
  * Alignment is the number of bytes that the value must be a multiple of
@@ -49,7 +57,8 @@ uint64_t align_up(uint64_t value, uint64_t alignment);
  * - key: 128-bit encryption key (array of 4 uint32_t)
  * - nonce: 64-bit starting counter value for the stream cipher
  */
-void xtea_ctr_transform(uint8_t *data, size_t len, const uint32_t key[4], uint64_t nonce);
+void xtea_ctr_encrypt(uint8_t *data, size_t len, const uint32_t key[4], uint64_t nonce);
+void xtea_ctr_decrypt(uint8_t *cursor, uint64_t remaining, const uint32_t key[4], uint64_t counter);
 /**
  * Get a pointer to the embedded stub data.
  * Returns a pointer to the beginning of the stub data.
