@@ -1,7 +1,10 @@
 {
-    "files.associations": {
-        "array": "c",
-        "string": "c",
-        "string_view": "c"
-    }
+  "files.associations": {
+    "array": "c",
+    "string": "c",
+    "string_view": "c"
+  },
+  "files.exclude": {
+    "**/*.o": true
+  }
 }
